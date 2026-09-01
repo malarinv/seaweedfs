@@ -65,6 +65,12 @@ message RemoteConf {
   string contabo_secret_key = 69;
   string contabo_endpoint = 70;
   string contabo_region = 71;
+
+  // local backend serves a host filesystem tree as a remote storage target.
+  // Reads of bucket/path pairs resolve to $(local_path)/$(path) on disk.
+  // Writes are not supported: this backend exists for read-only cache-on-read
+  // migration scenarios (e.g. legacy HDD exposed via FUSE mount).
+  string local_path = 80;
 }
 
 message RemoteStorageMapping {

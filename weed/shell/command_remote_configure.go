@@ -44,6 +44,7 @@ func (c *commandRemoteConfigure) Help() string {
 	remote.configure -name=cloud6 -type=wasabi -wasabi.access_key=xxx -wasabi.secret_key=yyy -wasabi.endpoint=s3.us-west-1.wasabisys.com -wasabi.region=us-west-1
 	remote.configure -name=cloud7 -type=storj -storj.access_key=xxx -storj.secret_key=yyy -storj.endpoint=https://gateway.us1.storjshare.io
 	remote.configure -name=cloud8 -type=filebase -filebase.access_key=xxx -filebase.secret_key=yyy -filebase.endpoint=https://s3.filebase.com
+	remote.configure -name=local_hdd -type=local -local.path=/mnt/legacy-hdd
 
 	# delete one configuration
 	remote.configure -delete -name=cloud1
@@ -117,6 +118,8 @@ func (c *commandRemoteConfigure) Do(args []string, commandEnv *CommandEnv, write
 	remoteConfigureCommand.StringVar(&conf.StorjAccessKey, "storj.access_key", "", "Storj access key")
 	remoteConfigureCommand.StringVar(&conf.StorjSecretKey, "storj.secret_key", "", "Storj secret key")
 	remoteConfigureCommand.StringVar(&conf.StorjEndpoint, "storj.endpoint", "", "Storj endpoint")
+
+	remoteConfigureCommand.StringVar(&conf.LocalPath, "local.path", "", "local backend: root directory that backs the remote. Reads resolve to $(local.path)/$(remote-path); writes are not supported.")
 
 	if err = remoteConfigureCommand.Parse(args); err != nil {
 		return nil
