@@ -4,8 +4,11 @@ FROM --platform=$BUILDPLATFORM golang:1.26-alpine AS builder
 RUN apk add git g++ fuse
 RUN mkdir -p /go/src/github.com/seaweedfs/
 ARG BRANCH=${BRANCH:-master}
+# Override the source repository to build from a fork. Defaults to upstream;
+# feature branches that haven't been PR'd upstream will set this to their fork.
+ARG GIT_REPOSITORY=${GIT_REPOSITORY:-https://github.com/seaweedfs/seaweedfs}
 # Clone with full history and all tags to ensure all commits are available
-RUN git clone --no-single-branch --tags https://github.com/seaweedfs/seaweedfs /go/src/github.com/seaweedfs/seaweedfs
+RUN git clone --no-single-branch --tags $GIT_REPOSITORY /go/src/github.com/seaweedfs/seaweedfs
 ARG TAGS
 RUN cd /go/src/github.com/seaweedfs/seaweedfs && \
     (git checkout $BRANCH || \
