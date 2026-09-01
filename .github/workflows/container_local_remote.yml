@@ -203,7 +203,9 @@ jobs:
         run: |
           mkdir -p /tmp/digests
           digest="${{ steps.build.outputs.digest }}"
-          touch "/tmp/digests/${digest#sha256:}"
+          # Filename encodes the arch so the merge step can pair digests
+          # with platforms without reading the artifact name.
+          touch "/tmp/digests/${digest#sha256:}.${{ matrix.arch }}"
 
       - name: Upload digest
         uses: actions/upload-artifact@v7
@@ -237,15 +239,26 @@ jobs:
       - name: Build and push multi-arch manifest
         run: |
           set -eu
-          # Translate the digest files (named by sha256) into a list the
-          # buildx imagetools command expects: tag@sha256:... per arch.
+          # Filenames look like "<sha>.<arch>" (e.g. "029b13...amd64"). Split
+          # the basename on the last dot so a hex suffix cannot be mistaken
+          # for the arch label.
           args=()
           for f in /tmp/digests/*; do
             [ -e "$f" ] || continue
-            sha=$(basename "$f")
-            arch=$(echo "$f" | sed -nE 's/.*digest-local-remote-(amd64|arm64).*/\1/p')
+            base=$(basename "$f")
+            sha="${base%.*}"
+            arch="${base##*.}"
+            if [ -z "$sha" ] || [ -z "$arch" ] || [ "$sha" = "$arch" ]; then
+              echo "skipping unrecognized digest file: $f" >&2
+              continue
+            fi
             args+=("--tag" "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-${arch}@sha256:${sha}")
           done
+          if [ "${#args[@]}" -eq 0 ]; then
+            echo "no per-arch digests found in /tmp/digests" >&2
+            ls -la /tmp/digests >&2 || true
+            exit 1
+          fi
           # Multi-arch manifest tag, layered on top of the per-arch tags.
           args+=("--tag" "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi")
           echo "manifest args:"
