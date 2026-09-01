@@ -239,10 +239,10 @@ jobs:
       - name: Build and push multi-arch manifest
         run: |
           set -eu
-          # Filenames look like "<sha>.<arch>" (e.g. "029b13...amd64"). Split
-          # the basename on the last dot so a hex suffix cannot be mistaken
-          # for the arch label.
-          args=()
+          # Filenames look like "<sha>.<arch>" (e.g. "029b13...amd64"). The
+          # build jobs pushed the per-arch images by digest only, so the
+          # source for the multi-arch index is each digest directly.
+          sources=()
           for f in /tmp/digests/*; do
             [ -e "$f" ] || continue
             base=$(basename "$f")
@@ -252,24 +252,29 @@ jobs:
               echo "skipping unrecognized digest file: $f" >&2
               continue
             fi
-            args+=("--tag" "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-${arch}@sha256:${sha}")
+            sources+=("${{ env.IMAGE }}@sha256:${sha}")
           done
-          if [ "${#args[@]}" -eq 0 ]; then
+          if [ "${#sources[@]}" -eq 0 ]; then
             echo "no per-arch digests found in /tmp/digests" >&2
             ls -la /tmp/digests >&2 || true
             exit 1
           fi
-          # Multi-arch manifest tag, layered on top of the per-arch tags.
-          args+=("--tag" "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi")
-          echo "manifest args:"
-          printf '  %s\n' "${args[@]}"
-          docker buildx imagetools create "${args[@]}"
+          echo "sources:"
+          printf '  %s\n' "${sources[@]}"
+          # imagetools create reads each source by digest and assembles a
+          # multi-arch index at the destination tag. The :multi tag is what
+          # the cluster pulls; the per-arch tags are not produced here.
+          docker buildx imagetools create \
+            "${sources[@]}" \
+            -t "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi"
 
   test:
     needs: [build]
     runs-on: ubuntu-latest
     # Smoke-test the freshly-built image by running weed -version and the
     # remote.configure help to confirm the new local backend is registered.
+    # The :multi tag is what the cluster pulls; pulling a specific arch
+    # would require a single-arch tag we don't produce.
     steps:
       - name: Login to GHCR
         uses: docker/login-action@v4.6.0
@@ -278,9 +283,10 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Smoke test amd64
+      - name: Smoke test multi-arch
         run: |
-          docker run --rm "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-amd64" -version
+          # --platform forces amd64 to avoid depending on the runner's arch.
+          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" -version
           # Help text should mention the new -local.path flag.
-          docker run --rm "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-amd64" shell -h 2>&1 | grep -q "remote.configure"
-          docker run --rm "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-amd64" shell -h 2>&1 | grep -q "type=local"
+          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" shell -h 2>&1 | grep -q "remote.configure"
+          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" shell -h 2>&1 | grep -q "type=local"
