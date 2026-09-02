@@ -273,7 +273,7 @@ jobs:
             -t "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi"
 
   test:
-    needs: [build]
+    needs: [build, merge]
     runs-on: ubuntu-latest
     # Smoke-test the freshly-built image. We (1) inspect the multi-arch
     # index, (2) run `weed version` to confirm the binary boots on amd64,
