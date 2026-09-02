@@ -271,10 +271,14 @@ jobs:
   test:
     needs: [build]
     runs-on: ubuntu-latest
-    # Smoke-test the freshly-built image by running weed -version and the
-    # remote.configure help to confirm the new local backend is registered.
-    # The :multi tag is what the cluster pulls; pulling a specific arch
-    # would require a single-arch tag we don't produce.
+    # Smoke-test the freshly-built image. We (1) inspect the multi-arch
+    # index, (2) run `weed version` to confirm the binary boots on amd64,
+    # and (3) check that the remote.configure subcommand advertises the
+    # -local.path flag, which only appears when the local backend's init()
+    # survived dead-code elimination. A blank-import in command/imports.go
+    # is required for the symbol to be in the binary at all; without it
+    # the makers map never receives the "local" key and remote.mount
+    # returns "remote storage type local not found" at runtime.
     steps:
       - name: Login to GHCR
         uses: docker/login-action@v4.6.0
@@ -286,21 +290,39 @@ jobs:
       - name: Smoke test multi-arch
         run: |
           # --platform forces amd64 to avoid depending on the runner's arch.
+          # --pull=always makes sure we test THIS build's image, not a stale
+          # cached one. Without it, runners cache the previous build's layers
+          # and the smoke test validates an old image.
           set -euo pipefail
-          # Confirm the binary actually starts (no missing libs, no init
-          # crashes) by running `weed -h` and checking for the standard
-          # banner. The local backend is verified at compile time (the
-          # proto and Go code are generated and the package is referenced
-          # from init()); a smoke test only needs to confirm the image
-          # is bootable.
-          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" -h 2>&1 | tee /tmp/weed-help.txt
-          grep -q "SeaweedFS" /tmp/weed-help.txt
-          # And the binary version, which is the closest thing to a
-          # smoke signal that the actual compiled artefact is good.
-          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" version 2>&1 | tee /tmp/weed-version.txt
-          # Pull the per-arch image from the multi-arch index by digest
-          # via docker manifest inspect, just to confirm the index lists
-          # both platforms.
-          docker manifest inspect "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" | tee /tmp/manifest.json
-          grep -q "linux/amd64" /tmp/manifest.json
-          grep -q "linux/arm64" /tmp/manifest.json
+          IMAGE="${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi"
+
+          # (1) Verify the multi-arch index itself. imagetools inspect resolves
+          # the index to per-arch manifests, so this confirms both digests are
+          # present in the tag we just pushed.
+          docker buildx imagetools inspect "$IMAGE" --raw > /tmp/index.json
+          grep -q '"linux/amd64"' /tmp/index.json
+          grep -q '"linux/arm64"' /tmp/index.json
+
+          # (2) Pull the per-arch image for amd64 fresh from the registry.
+          docker pull --platform linux/amd64 "$IMAGE"
+          # (3) Confirm the binary actually starts. `weed version` is the
+          # cheapest bootable check: prints the build SHA and exits 0, so it
+          # works under `set -e`. (`weed -h` exits 2 under cobra, which would
+          # fail the pipe.)
+          docker run --rm --platform linux/amd64 "$IMAGE" version 2>&1 | tee /tmp/weed-version.txt
+          grep -Eq "version[[:space:]]+.*linux[[:space:]]+amd64" /tmp/weed-version.txt
+
+          # (4) The local backend is registered in the global
+          # RemoteStorageClientMakers map by an init() that only survives
+          # dead-code elimination if the package is blank-imported. The
+          # remote.configure subcommand's -h output is generated from the
+          # command struct at startup, so the -local.path flag appears in
+          # the help iff the package is wired in.
+          # Start a 1-line weed shell that just prints the subcommand help
+          # and exits. The shell is interactive, so we drive it over stdin
+          # and quit immediately. -master/-filer are required but never
+          # contacted for the help path.
+          docker run --rm -i --platform linux/amd64 "$IMAGE" \
+            shell -master=127.0.0.1:9333 -filer=127.0.0.1:8888 \
+            <<<'remote.configure -h' 2>&1 | tee /tmp/remote-configure-help.txt
+          grep -q -- "-local.path" /tmp/remote-configure-help.txt
