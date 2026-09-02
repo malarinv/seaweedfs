@@ -286,7 +286,15 @@ jobs:
       - name: Smoke test multi-arch
         run: |
           # --platform forces amd64 to avoid depending on the runner's arch.
-          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" -version
-          # Help text should mention the new -local.path flag.
-          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" shell -h 2>&1 | grep -q "remote.configure"
-          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" shell -h 2>&1 | grep -q "type=local"
+          set -euo pipefail
+          # Confirm the binary actually starts (no missing libs, no init
+          # crashes) by running `weed -h` and checking for the standard
+          # banner.
+          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" -h 2>&1 | tee /tmp/weed-help.txt
+          grep -q "SeaweedFS" /tmp/weed-help.txt
+          # `weed shell -h` covers all subcommands; the new example line
+          # for the local backend lives in command_remote_configure.go and
+          # is included in the shell help output.
+          docker run --rm --platform linux/amd64 "${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi" shell -h 2>&1 | tee /tmp/weed-shell-help.txt
+          grep -q "remote.configure" /tmp/weed-shell-help.txt
+          grep -q "type=local" /tmp/weed-shell-help.txt
