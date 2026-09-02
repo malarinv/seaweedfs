@@ -7,16 +7,23 @@ ARG BRANCH=${BRANCH:-master}
 # Override the source repository to build from a fork. Defaults to upstream;
 # feature branches that haven't been PR'd upstream will set this to their fork.
 ARG GIT_REPOSITORY=${GIT_REPOSITORY:-https://github.com/seaweedfs/seaweedfs}
-# Clone with full history and all tags to ensure all commits are available
-RUN git clone --no-single-branch --tags $GIT_REPOSITORY /go/src/github.com/seaweedfs/seaweedfs
+# Clone with full history and all tags to ensure all commits are available.
+# The CACHEBUST arg is set to $BRANCH from CI so docker's layer cache key
+# changes every push; without it, `--cache-from type=gha` would restore the
+# source layer from a previous build whose `.git` directory pointed to a
+# stale SHA, and `git rev-parse --short HEAD` (used for the COMMIT ldflag
+# below) would report the cached value instead of the freshly pushed one.
+ARG CACHEBUST=${CACHEBUST:-$BRANCH}
+RUN echo "CACHEBUST=$CACHEBUST" && \
+    git clone --no-single-branch --tags $GIT_REPOSITORY /go/src/github.com/seaweedfs/seaweedfs
 ARG TAGS
 RUN cd /go/src/github.com/seaweedfs/seaweedfs && \
-    (git checkout $BRANCH || \
-     (echo "Checkout failed, fetching all history..." && \
-      git fetch --all --tags --prune && \
-      git checkout $BRANCH) || \
-     (echo "ERROR: Branch/commit $BRANCH not found in repository" && \
-      echo "Available branches:" && git branch -a && exit 1))
+    (git fetch --all --tags --prune --depth=1 origin "$BRANCH" && \
+     git checkout FETCH_HEAD) || \
+    (echo "Checkout failed, falling back to local branch tip..." && \
+     (git checkout $BRANCH || \
+      (echo "ERROR: Branch/commit $BRANCH not found in repository" && \
+       echo "Available branches:" && git branch -a && exit 1)))
 ARG TARGETOS TARGETARCH TARGETVARIANT
 RUN cd /go/src/github.com/seaweedfs/seaweedfs/weed \
   && export LDFLAGS="-X github.com/seaweedfs/seaweedfs/weed/util/version.COMMIT=$(git rev-parse --short HEAD)" \
