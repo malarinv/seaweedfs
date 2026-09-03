@@ -296,10 +296,13 @@ jobs:
           set -euo pipefail
           IMAGE="${{ env.IMAGE }}:${{ env.TAG_SUFFIX }}-multi"
 
-          # (1) Verify the multi-arch index lists both platforms.
+          # (1) Verify the multi-arch index lists both platforms. The OCI
+          # index prints "os" and "architecture" as separate keys, so the
+          # greps are scoped to each field rather than concatenated strings.
           docker buildx imagetools inspect "$IMAGE" --raw > /tmp/index.json
-          grep -q '"linux/amd64"' /tmp/index.json
-          grep -q '"linux/arm64"' /tmp/index.json
+          grep -q '"os": "linux"' /tmp/index.json
+          grep -q '"architecture": "amd64"' /tmp/index.json
+          grep -q '"architecture": "arm64"' /tmp/index.json
 
           # (2) Pull amd64 fresh. --platform avoids the manifest list dance.
           docker pull --platform linux/amd64 "$IMAGE"
